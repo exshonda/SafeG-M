@@ -19,7 +19,7 @@ Linker script and memory map
 
 LOAD startup_ns.o
 LOAD ns_test_main.o
-LOAD ../../../FreeRTOS/sample/mps2_an505_gcc/secure_nsclib.o
+LOAD /tmp/m3_sec/secure_nsclib.o
 LOAD /usr/lib/gcc/arm-none-eabi/13.2.1/thumb/v8-m.main+fp/softfp/libgcc.a
 
 .text           0x00200000      0x168
