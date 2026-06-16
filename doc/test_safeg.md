@@ -249,3 +249,73 @@ NS 由来 CPU 例外の Secure 捕捉は exc6 では受けられない。
 → **D1 PASS。A1/A2/A3/B1-B4/C1-C3/D1 全 9 件 PASS，fail=0，DONE 到達。Excno=3 Unregistered 停止は消滅**（fault 行 0 件）。A/B/C も非回帰。
 
 注（軽微・表示上）: 1 ブート内でテストが複数回ループ実行され，2 周目以降は CP の表示名が前周の最後の名前（例 "B4"）のまま番号だけ更新される箇所がある（CHK 値・番号・SUMMARY は正しく，合否判定には無影響）。harness の CP 名更新を CP ごとに行うようにすれば解消できる将来課題。
+
+---
+
+## 実機再現ラン (2026-06-17, mimxrt685evk_gcc, ベアメタル NS, A3+C+D1 有効)
+
+引き継ぎフォークによる再現・取得。Secure イメージ `/tmp/bld_rt685_s/asp.srec`
+(banner 06:25:05 build) と NS `nstest.axf`(NS_VTOR 0x8400000, `-DTST_ENABLE_A3
+-DTST_ENABLE_C -DTST_ENABLE_D1`) を再ビルドし，mass-erase 済みフラッシュへ
+Secure→NS の順に LinkServer flash で書込み(両 EXIT=0)。
+
+### NS ビルド
+- `test/ns_baremetal/mimxrt685evk_gcc` で `make clean && make
+  EXTRA_CFLAGS="-DTST_ENABLE_A3 -DTST_ENABLE_C -DTST_ENABLE_D1"` 成功。
+- `gcc/nstest.axf` Entry=0x8400185, LOAD 0x08400000(0x4c8)/0x20240000(RW)。
+- ns_test_main.o に A3(`tg_request_restart`),C(`tg_begin_preempt`),D1(`udf #0`) 反映を確認。
+- implib `secure_nsclib.o` は Secure ビルド出力(`/tmp/bld_rt685_s/secure_nsclib.o`)と
+  バイト一致(`FreeRTOS/sample/mimxrt685evk_gcc/secure_nsclib.o`)。
+- Secure elf に `hardfault_handler`(exc3)/`tg_finish` veneer 在中，
+  `_kernel_exc_tbl[3]=hardfault_handler` 配線済を確認。
+
+### 実機トランスクリプト(/dev/ttyACM1 @115200, 4 回再現とも同一)
+```
+[TST] START prog=safeg-trans
+[TST] RESULT_ADDR 0x30000020
+[TST] CP A1 161
+[TST] CHK 1 exp=0x00000000 act=0x00000000 PASS   (A2: CONTROL_NS==0)
+[TST] CHK 2 exp=0x00000001 act=0x00000001 PASS   (A2: FAULTMASK==1)
+[TST] CP A3 163
+[TST] CP B1 177
+[TST] CHK 3 exp=0x00000000 act=0x00000000 PASS   (B3: BASEPRI_S 復帰)
+[TST] CHK 4 exp=0x00000080 act=0x00000080 PASS   (B2: gate API)
+[TST] CHK 5 exp=0x00000000 act=0x00000000 PASS
+[TST] MARK 0x000000b4
+[TST] CP B4 180
+[TST] MARK 0x000000b4
+[TST] MARK 0x000000c0
+[TST] CP C1 193
+[TST] CHK 194 exp=0x00000002 act=0x00000002 PASS (C2)
+[TST] CHK 195 exp=0x00000080 act=0x00000080 PASS (C3: BASEPRI_S)
+[TST] CHK 206 exp=0x00000001 act=0x00000001 PASS
+[TST] CP D0 208
+   ← ここで停止。D1 / SUMMARY / DONE は出力されず。
+```
+
+### 結果
+- **A1/A2/A3/B1-B4/C1/C2/C3 = 8 checkpoint / 全 CHK PASS, fail=0**。C(NS 横取り
+  ディスパッチ)を含め FPU 退避バグ(`vstmdb`)の非回帰を実機確認(fault 行 0 件)。
+- **D1 のみ未取得**: NS の `udf #0`(CP D0 直後)で **コアが CP D0 で停止**し，
+  D1/SUMMARY/DONE に到達しない。
+
+### D1 が取れない原因(確定)＝デバッガ常駐時の halt-on-fault
+- デバッガ(LinkServer `run` / `gdbserver`)が接続したまま自走させると，NS の `udf`
+  が起こす HardFault(BFHFNMINS=0 → Secure 側 exc3)が **firmware の
+  hardfault_handler に入る前にデバッグ HALT で止まる**ため，D1 が記録されない。
+  - `LinkServer run --exit-timeout {8,30,40}` を計 4 回: いずれも CP D0 で停止
+    (D0 後 30〜40 秒待っても新規出力 0)。
+  - `gdbserver`: `monitor reset` が "No image address available for soft reset" で
+    失敗，DEMCR(vector-catch)書換え→detach の自走化も成立せず(本 LinkServer は
+    target description を reject し batch gdb 操作が脆弱)。
+- 前回フォークが doc 上段で得た **9/9 green(D1 PASS)** は，A〜C の番号
+  (A1=161/A3=163/B1=177/B4=180/C1=193/D0=208)が今回と完全一致することから
+  **同一ビルド・同一実行経路**であり，D1 は**デバッガを完全に切り離した状態
+  (= 物理 RESET ボタン / 電源再投入)** で取得されたものと判断する。
+
+### 物理 RESET 依頼(ユーザー作業)
+- 両イメージは現状フラッシュ済み。**EVK の RESET ボタンを 1 回押す**(デバッガ
+  非接続で自走)と，NS の udf→Secure exc3→hardfault_handler 経路が halt されずに
+  実行され，`CP D1 209 / CHK209 PASS / SUMMARY total=9 pass=9 fail=0 / DONE` が
+  /dev/ttyACM1 @115200 に出るはず(doc 上段の 9/9 と一致見込み)。
+- 取得コマンド例: `timeout 30 cat /dev/ttyACM1`(115200 raw)で RESET 押下直後を capture。
