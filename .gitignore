@@ -10,6 +10,16 @@ asp3/build*/
 *.timestamp
 secure_nsclib.o
 
+# NS ベアメタル ビルド成果物（再生成される）
+nstest.bin
+nstest.elf
+nstest.map
+out.map
+
+# キャプチャ/作業ログ（リポジトリ直下）
+/ad1_reset.log
+/*.log
+
 # バックアップ
 *.tgz
 *.tar.gz

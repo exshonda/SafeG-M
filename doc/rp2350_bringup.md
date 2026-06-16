@@ -271,3 +271,27 @@ stty -F /dev/ttyACM2 115200 raw -echo; timeout 10 cat /dev/ttyACM2
 - **シリアルは /dev/ttyACM2**（asp3_core ttsp の記述と一致）。ttyACM0 は別プローブ(LPC-LINK2/ST-LINK)の VCP で出力なし。
 - バナー先頭は捕捉開始タイミングで切れることがある（task1 ループは継続出力）。確実に全体を見るには reset 直後から capture。
 - 次段(SafeG TZ 載せ替え後): RP2350 ボード層(Secure target=SAU/NS_VTOR/ld, `test/ns_baremetal/pico2_arm_gcc/`, SIO配線)を an505 同型で新設し、遷移テスト A〜D1 を本実機で。M33×2 のモニタ実行コア固定(Core0)は M2 で決定。
+
+---
+
+## SafeG-M 遷移テスト A〜D1 実機ラン試行（2026-06-17, SafeG=1 / m3-nontecs）
+
+dual-OS 遷移テスト(A1〜D1)のフル green 取得を試行。**ビルドは全工程成功・成果物は実機書込み待ちで準備完了**だが、**RP2350 の reset/halt が timeout する劣化症状**により書込み(program)に至らず中断。物理復旧を依頼。
+
+### ビルド結果（成功・実測）
+- **Secure(asp3_core, `pico2_arm` preset, ENABLE_SAFEG_M=ON / ENABLE_SAFEG_IMPLIB=ON)**:
+  - app= `test/secure/{test_safeg.c,test_gate.c}` + `test/common/test_harness.c`(同期フラッシュ版 @58e4909)。
+  - `FLASH 15968B / SG_veneer 96B / RAM 27816B`。`-mcmse` 有効、`SG_veneer` セクション生成。
+  - **`secure_nsclib.o`(556B, gate veneer ×10: tg_checkpoint/chk_u32/mark/get_phase/request_restart/api_check/basepri_check/begin_preempt/end_preempt/finish)生成確認**。`_kernel_launch_ns`@0x10003230, `_SAFEG_BTASK` シンボルあり。
+  - ビルド先 `/tmp/run_sec`。
+- **NS(test/ns_baremetal/pico2_arm_gcc, `-DTST_ENABLE_A3 -DTST_ENABLE_C -DTST_ENABLE_D1`)**:
+  - 上記 `secure_nsclib.o` をリンク。`.text @0x10200000`(NS_VTOR一致), bin 288B。
+  - disasm 確認: A3(`tg_get_phase`/`tg_request_restart`)、C(`tg_begin_preempt`/`tg_end_preempt`)、D1(`udf #0`)を含む＝全カテゴリ有効。
+- **TST_ENABLE_* は NS 側のみ有効**（`ns_test_main.c` のみが参照。Secure 側は常時全ハンドラ提供）。pass=9 内訳(全 CHK): A2×2(CONTROL/FAULTMASK) + B2(API) + B3×2(BASEPRI entry/after) + C(0xCE end_preempt) + C(hi_task 0xC2/0xC3) + D1(0xD1) = 9。
+
+### 実機書込み（中断・劣化）
+- 非破壊 `init; targets`: **成功**（SWD DPIDR `0x4c013477`, cm0/cm1 Examination succeed, CMSIS-DAP 2e8a:000c serial E660583883487B39）。
+- `program asp.elf verify` / `reset halt` / `reset init`: **いずれも `Error: timed out while waiting for target halted` / `Unable to reset target`**。
+  - 試行: (1) `reset halt`+program 5000kHz → timeout、(2) `program ... verify reset exit` 5000kHz → timeout、(3) `reset init` 2000kHz → timeout。**規定どおり 2 リトライで中断**。
+- リセット後シリアル(/dev/ttyACM2): 出力なし(バナー/[TST] とも無し)。
+- → **examination は通るが reset/halt 系が一律 timeout**＝doc 規定の劣化兆候。**RP2350 物理復旧(BOOTSEL 起動 or 電源再投入)が必要**。復旧後は上記 `/tmp/run_sec/asp.elf` + `nstest.bin @0x10200000` を `program ... verify reset` で書込み、/dev/ttyACM2 115200 で [TST] A1〜D1 / SUMMARY total=9 を取得する段に直結。
