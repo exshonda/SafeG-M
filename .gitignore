@@ -1,0 +1,16 @@
+# 生成される overlay キャッシュ（tools/import_*.sh で再生成。外部の素 ASP3/FreeRTOS）
+/asp3_base/
+/freertos_base/
+
+# ビルドディレクトリ・成果物
+asp3/build*/
+**/gcc/
+*.o
+*.d
+*.timestamp
+secure_nsclib.o
+
+# バックアップ
+*.tgz
+*.tar.gz
+*.bak

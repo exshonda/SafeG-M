@@ -1,0 +1,130 @@
+#
+# Makefile のターゲット依存部（ARM MPS2-AN505 / QEMU 用）
+#
+# ※ WIP scaffold（doc/qemu_an505_port.md 参照）。
+#   未作成: target_kernel_impl.c, SIO(cmsdk_uart/target_serial or TECS), chip層, cfg/trb 一式。
+#   本ファイル単独ではまだ configure/ビルドは通らない（§5,§9）。
+#
+
+#
+# ボード名, チップ名，コア名，開発環境名の定義
+#
+BOARD = mps2_an505
+# TODO: 薄いchip層を新設して指定する（CORE_TYPE=CORTEX_M33 + include Makefile.core）。
+#       imxrt600 の chip_*.h を雛形に SSE-200/CMSDK 用へ簡略化する。
+CHIP  = mps2_an505
+PRC   = arm_m
+TOOL  = gcc
+
+#
+# SafeG-Mを使用するか（小: 0 で Secure 単独起動を先に確認 → 中: 1）
+#
+ifeq ($(ENABLE_SAFEG_M),)
+ENABLE_SAFEG_M := 0
+endif
+
+#
+# FPUを使用するか（an505/IoTKit は CPU0 が FPU を実装。修正(A)込みで遅延スタッキング）
+#
+FPU_USAGE = FPU_LAZYSTACKING
+
+#
+# 使用するタイマ（an505 は SysTick を使用＝imxrt600固有TIM不要）
+#  HRT     : SysTick をイベント駆動の高分解能タイマとして使用（既定，推奨）
+#  SYSTICK : SysTick を周期タイムティックとして使用（core_timer.c）
+#  QEMU では周期 SysTick だと毎tick signal_time が空回りし（"no time event"
+#  洪水），タイムイベント処理が破綻するため，イベント駆動 HRT を既定とする．
+#
+KERNEL_TIMER = HRT
+
+#
+# TrustZoneを使用するか
+#
+ENABLE_TRUSTZONE = $(ENABLE_SAFEG_M)
+
+#
+# コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+CDEFS := $(CDEFS) -DTOPPERS_USE_QEMU
+COPTS := $(COPTS)
+LDFLAGS := -nostdlib -nostartfiles $(LDFLAGS)
+
+#
+# ファイルサイズ削減のためのオプション
+#
+COPTS   := $(COPTS) -ffunction-sections -fdata-sections
+OBJ_LDFLAGS := $(OBJ_LDFLAGS) -Wl,--gc-sections -Wl,--print-memory-usage
+
+#
+# カーネルに関する定義
+#  start.o は common/start.S（汎用スタートアップ）を使用。
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(TARGETDIR)
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) start.o
+KERNEL_COBJS := $(KERNEL_COBJS) target_kernel_impl.o
+
+#
+# システムサービスに関する定義（方式S1: 非TECS SIO の場合）
+#  TODO: SIO 方式を確定（非TECS cmsdk_uart/target_serial か TECS tSIOPortTarget）。
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS)
+SYSSVC_COBJS := $(SYSSVC_COBJS)
+
+#
+# 使用するタイマ
+#
+ifeq ($(KERNEL_TIMER), SYSTICK)
+CDEFS := $(CDEFS) -DUSE_SYSTICK_AS_TIMETICK
+KERNEL_COBJS := $(KERNEL_COBJS) core_timer.o
+endif
+ifeq ($(KERNEL_TIMER), HRT)
+CDEFS := $(CDEFS) -DUSE_TIM_AS_HRT
+KERNEL_COBJS := $(KERNEL_COBJS) target_timer.o
+endif
+
+#
+# GNU開発環境のターゲットアーキテクチャの定義
+#
+GCC_TARGET = arm-none-eabi
+
+#
+# トレースログ記録のサンプルコードに関する定義
+#
+ifdef ENABLE_TRACE
+	COPTS := $(COPTS) -DTOPPERS_ENABLE_TRACE
+	SYSSVC_DIRS := $(SYSSVC_DIRS) $(SRCDIR)/arch/tracelog
+endif
+
+#
+# 依存関係の定義
+#
+cfg1_out.timestamp:
+offset.timestamp:
+kernel_cfg.timestamp: $(TARGETDIR)/target_kernel.trb
+check.timestamp: $(TARGETDIR)/target_check.trb
+
+#
+# リンカスクリプトの定義
+#  TODO: SafeG有効時は Secure/NS 分割版 mps2_an505_s.ld を用意する。
+#
+ifeq ($(ENABLE_SAFEG_M),1)
+LDSCRIPT = $(TARGETDIR)/mps2_an505_s.ld
+else
+LDSCRIPT = $(TARGETDIR)/mps2_an505.ld
+endif
+
+ifeq ($(ENABLE_SAFEG_M),1)
+#
+# TrustZone関連の設定（an505 NS code エイリアス 0x00200000 = Secure 0x10200000 と同一実体）
+#
+CDEFS := $(CDEFS) -DTOPPERS_NS_VTOR=0x00200000
+COPTS := $(COPTS) -mcmse
+OBJ_LDFLAGS := $(OBJ_LDFLAGS) -Wl,--cmse-implib -Wl,--out-implib=$(SRCDIR)/../FreeRTOS/sample/$(TARGET)/secure_nsclib.o
+CLEAN_FILES := $(CLEAN_FILES) $(SRCDIR)/../FreeRTOS/sample/$(TARGET)/secure_nsclib.o
+endif
+
+#
+# チップ依存部のインクルード
+#
+include $(SRCDIR)/arch/$(PRC)_$(TOOL)/$(CHIP)/Makefile.chip

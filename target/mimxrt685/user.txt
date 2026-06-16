@@ -1,0 +1,44 @@
+    TOPPERS/SafeG-M
+    MIMXRT685依存部 ユーザマニュアル
+
+    対応バージョン: Release 1.0.1
+    最終更新: 2022年04月14日
+
+○概要
+本ターゲット依存部でサポートするターゲットプロセッサ，評価ボード，ターゲ
+ット名は次の通りである．
+
+・NXP i.MX RT685
+ ・評価ボード   : MIMXRT685-EVK
+ ・ターゲット名 : mimxrt685evk
+
+本マニュアルでは上記ターゲット上でSafeG-Mのサンプルプログラムを動作させる
+方法を説明する．ターゲットに関するその他の情報はasp3/target/mimxrt685evk_gcc/
+target_user.txtに記載されているため，こちらも参照すること．
+
+○IDEのサポート
+MCUXpressoが利用できる．サンプルプログラムは次の手順でビルドできる．
+ビルドにはMIMXRT685 SDKのインストールが必要である．
+
+1.
+ワークスペースにtarget/mimxrt685/sampleを指定し，IDEを起動する．
+
+2.
+File -> Import -> General -> Existing Projects into Workspace
+を選択する．
+Select root directory にsampleディレクトリを指定し，Secure，Nonsecure
+にチェックを入れてFinishをクリックする．
+
+3.
+Secureプロジェクト内のconfigure.launchを右クリックし，Run As -> configure
+を選択することでコンフィギュレーションを行う．
+
+4.
+Secureプロジェクトをビルドする．
+
+5.
+Nonsecureプロジェクトをビルドする．
+
+6.
+Secureプロジェクト内のsample.launchを右クリックし，Debug As -> sample
+を選択することでデバッグが行える．

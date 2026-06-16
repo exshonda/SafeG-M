@@ -1,0 +1,99 @@
+
+Discarded input sections
+
+ .text          0x00000000        0x0 startup_ns.o
+ .data          0x00000000        0x0 startup_ns.o
+ .bss           0x00000000        0x0 startup_ns.o
+ .text          0x00000000        0x0 ns_test_main.o
+ .data          0x00000000        0x0 ns_test_main.o
+ .bss           0x00000000        0x0 ns_test_main.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+NS_FLASH         0x00200000         0x00100000         xr
+NS_RAM           0x28200000         0x00100000         xrw
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD startup_ns.o
+LOAD ns_test_main.o
+LOAD ../../../FreeRTOS/sample/mps2_an505_gcc/secure_nsclib.o
+LOAD /usr/lib/gcc/arm-none-eabi/13.2.1/thumb/v8-m.main+fp/softfp/libgcc.a
+
+.text           0x00200000      0x168
+ *(.ns_vector)
+ .ns_vector     0x00200000       0x1c startup_ns.o
+                0x00200000                g_ns_vectors
+ *(.text*)
+ .text.Default_Handler
+                0x0020001c        0x4 startup_ns.o
+ .text.ResetISR
+                0x00200020       0x60 startup_ns.o
+                0x00200020                ResetISR
+ .text.startup.main
+                0x00200080       0xa0 ns_test_main.o
+                0x00200080                main
+ .text.startup.main.__stub
+                0x00200120       0x48 linker stubs
+ *(.rodata .rodata.* .constdata .constdata.*)
+                0x00200168                        . = ALIGN (0x4)
+
+.glue_7         0x00200168        0x0
+ .glue_7        0x00200168        0x0 linker stubs
+
+.glue_7t        0x00200168        0x0
+ .glue_7t       0x00200168        0x0 linker stubs
+
+.vfp11_veneer   0x00200168        0x0
+ .vfp11_veneer  0x00200168        0x0 linker stubs
+
+.v4_bx          0x00200168        0x0
+ .v4_bx         0x00200168        0x0 linker stubs
+
+.iplt           0x00200168        0x0
+ .iplt          0x00200168        0x0 startup_ns.o
+
+.rel.dyn        0x00200168        0x0
+ .rel.iplt      0x00200168        0x0 startup_ns.o
+
+.ARM.exidx      0x00200168        0x0
+                0x00200168                        __exidx_start = .
+ *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+                0x00200168                        __exidx_end = .
+                0x00200168                        __data_load = LOADADDR (.data)
+
+.data           0x28200000        0x0 load address 0x00200168
+                0x28200000                        __data_start = .
+ *(vtable)
+ *(.data*)
+                0x28200000                        . = ALIGN (0x4)
+                0x28200000                        __data_end = .
+
+.igot.plt       0x28200000        0x0 load address 0x00200168
+ .igot.plt      0x28200000        0x0 startup_ns.o
+
+.bss            0x28200000        0x4 load address 0x00200168
+                0x28200000                        __bss_start = .
+ *(.bss*)
+ .bss.ns_c_flag.0
+                0x28200000        0x4 ns_test_main.o
+ *(COMMON)
+                0x28200004                        . = ALIGN (0x4)
+                0x28200004                        __bss_end = .
+                0x28300000                        __stack_top = (ORIGIN (NS_RAM) + LENGTH (NS_RAM))
+OUTPUT(nstest.elf elf32-littlearm)
+LOAD linker stubs
+
+.comment        0x00000000       0x26
+ .comment       0x00000000       0x26 startup_ns.o
+                                 0x27 (size before relaxing)
+ .comment       0x00000026       0x27 ns_test_main.o
+
+.ARM.attributes
+                0x00000000       0x38
+ .ARM.attributes
+                0x00000000       0x38 startup_ns.o
+ .ARM.attributes
+                0x00000038       0x38 ns_test_main.o

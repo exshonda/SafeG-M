@@ -1,0 +1,49 @@
+    TOPPERS/SafeG-M
+    LPC55S69依存部 ユーザマニュアル
+
+    対応バージョン: Release 1.0.0
+    最終更新: 2021年04月14日
+
+○概要
+本ターゲット依存部でサポートするターゲットプロセッサ，評価ボード，ターゲ
+ット名は次の通りである．
+
+・NXP LPC55S69
+ ・評価ボード   : LPC55S69-EVK
+ ・ターゲット名 : lpc55s69evk
+
+本マニュアルでは上記ターゲット上でSafeG-Mのサンプルプログラムを動作させる
+方法を説明する．ターゲットに関するその他の情報はasp3/target/lpc55s69evk_gcc/
+target_user.txtに記載されているため，こちらも参照すること．
+
+○IDEのサポート
+MCUXpressoが利用できる．サンプルプログラムは次の手順でビルドできる．
+ビルドにはLPC55S69 SDKのインストールが必要である．
+
+1.
+ワークスペースにtarget/lpc55s69/sampleを指定し，IDEを起動する．
+
+2.
+File -> Import -> General -> Existing Projects into Workspace
+を選択する．
+Select root directory にsampleディレクトリを指定し，Secure，Nonsecure
+にチェックを入れてFinishをクリックする．
+
+3.
+Secureプロジェクト内のconfigure.launchを右クリックし，Run As -> configure
+を選択することでコンフィギュレーションを行う．
+
+4.
+Secureプロジェクトをビルドする．
+
+5.
+Nonsecureプロジェクトをビルドする．
+
+6.
+Secureプロジェクト内のsample.launchを右クリックし，Debug As -> sample
+を選択することでデバッグが行える．
+
+○AWSサンプル
+LPC55S69向けにはAWS shadowと通信するサンプルも用意している．こちらはワ
+ークスペースとして target/lpc55s691/aws_sample を設定すること．詳しく
+は上記ディレクトリ内にあるドキュメントを参照されたい．

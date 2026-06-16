@@ -1,0 +1,58 @@
+    TOPPERS/SafeG-M
+    STM32L552依存部 ユーザマニュアル
+
+    対応バージョン: Release 1.0.0
+    最終更新: 2021年04月14日
+
+○概要
+本ターゲット依存部でサポートするターゲットプロセッサ，評価ボード，ターゲ
+ット名は次の通りである．
+
+・STMicroelectronics STM32L552
+ ・評価ボード   : NUCLEO-L552ZE-Q
+ ・ターゲット名 : nucleo_l552zeq
+
+本マニュアルでは上記ターゲット上でSafeG-Mのサンプルプログラムを動作させる
+方法を説明する．ターゲットに関するその他の情報はasp3/target/nucleo_l552zeq_gcc/
+target_user.txtに記載されているため，こちらも参照すること．
+
+ただしオプションバイトを以下の通り設定し，TrusZoneを有効にすること．オ
+プションバイトの設定はSTM32CubeProgrammer等により行える．
+
+    DBANK = 1
+    TZEN = 1
+    SECWM1_PSTRT = 0x0
+    SECWM1_PEND = 0x7F
+    SECWM2_PSTRT = 0x7F
+    SECWM2_PEND = 0x0
+
+なお，DBANKおよびTZEN以外の設定項目は，TZENを設定後に設定可能となる．
+DBANK = 0とした場合も動作を確認しているが，STM32CubeIDEからの書き
+込みが正常にできない（バージョン1.9.0現在）．おそらくIDEの不具合であ
+ると思われる．STM32CubeProgrammerからであれば正常に書き込みが行える．
+
+○IDEのサポート
+STM32CubeIDEが利用できる．サンプルプログラムは次の手順でビルドできる．
+
+1.
+ワークスペースにtarget/stm32l552を指定し，IDEを起動する．
+
+2.
+File -> Import -> General -> Existing Projects into Workspace
+を選択する．
+Select root directory にsampleディレクトリを指定し，sample，Secure，
+Nonsecureにチェックを入れてFinishをクリックする．
+
+3.
+Secureプロジェクト内のconfigure.launchを右クリックし，Run As -> configure
+を選択することでコンフィギュレーションを行う．
+
+4.
+Secureプロジェクトをビルドする．
+
+5.
+Nonsecureプロジェクトをビルドする．
+
+6.
+Secureプロジェクト内のsample.launchを右クリックし，Debug As -> sample
+を選択することでデバッグが行える．
