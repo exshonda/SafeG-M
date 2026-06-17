@@ -93,11 +93,13 @@ void
 check_point(uint_t count)
 {
 	/*
-	 *  syslog は書式と引数のみを記録し，文字列の整形は後で LogTask が行う．
-	 *  そのため %s に渡すバッファはこの関数の寿命を超えて有効でなければ
-	 *  ならない（static にする）．
+	 *  [TST] 行は test_start() で LOG_EMERG をログマスクから外しているため
+	 *  lowmask 即時パスで syslog() 内に同期整形される（LogTask 遅延整形では
+	 *  ない）．よって %s バッファは本関数の寿命だけで足り，static は不要．
+	 *  static にすると例外コンテキスト(D1 の CP)とタスクコンテキストの
+	 *  check_point が共有 buf を破壊し得るため，ローカルにして再入安全とする．
 	 */
-	static char buf[4];
+	char buf[4];
 
 	tst_result.total++;
 	tst_result.last_cp = count;
