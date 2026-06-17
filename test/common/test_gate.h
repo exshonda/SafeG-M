@@ -50,6 +50,7 @@ extern void     tg_basepri_check(void);                  /* B3: BASEPRI_S 復帰
  */
 extern void     tg_begin_preempt(volatile uint32_t *ns_flag); /* C 開始: 横取り待ち登録 */
 extern void     tg_end_preempt(void);                    /* C 終了: 横取り成立を判定    */
+extern void     tg_puts(const char *s);                  /* A: NS コンソール出力(Secure UART) */
 extern void     tg_finish(void);                         /* SUMMARY + DONE を出力       */
 
 #endif /* TEST_GATE_H */

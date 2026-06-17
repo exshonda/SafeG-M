@@ -141,6 +141,35 @@ tg_end_preempt(void)
 }
 
 /*
+ *  汎用コンソール出力 gate（A: NS の標準出力を Secure UART に委譲）
+ *
+ *  NS から渡された文字列ポインタは信用せず，1バイトずつ NS 読取り可を
+ *  cmse_check_address_range で確認しながら Secure ローカル buf へ copy-in する
+ *  （範囲外/Secure アドレス混入は途中で打ち切り）。NUL 終端し tst_puts で出力。
+ */
+#define TG_PUTS_MAX 96u
+void NSE
+tg_puts(const char *ns_str)
+{
+	char buf[TG_PUTS_MAX];
+	uint32_t i;
+
+	for (i = 0u; i < TG_PUTS_MAX - 1u; i++) {
+		if (cmse_check_address_range((void *)&ns_str[i], 1u,
+									 CMSE_NONSECURE | CMSE_MPU_READ) == NULL) {
+			break;	/* NS 読取り不可アドレス → 打ち切り */
+		}
+		if (ns_str[i] == '\0') {
+			break;
+		}
+		buf[i] = ns_str[i];
+	}
+	buf[i] = '\0';
+	tst_puts(buf);
+	set_basepri(0);
+}
+
+/*
  *  集計と終端センチネルの出力
  */
 void NSE

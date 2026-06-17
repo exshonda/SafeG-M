@@ -132,6 +132,17 @@ tst_mark(uint32_t tag)
 	TST_FLUSH();
 }
 
+/*
+ *  Non-secure からの汎用コンソール出力（Secure 経由）。s は Secure 側で
+ *  検証済みのローカルバッファを想定する（gate 側で NS ポインタを copy-in する）。
+ */
+void
+tst_puts(const char *s)
+{
+	syslog(LOG_EMERG, "[NS] %s", (intptr_t)s);
+	TST_FLUSH();
+}
+
 void
 check_assert_error(const char *expr, const char *file, int_t line)
 {

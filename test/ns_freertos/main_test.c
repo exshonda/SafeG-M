@@ -22,6 +22,7 @@ test_task(void *arg)
 
 	/* ---- カテゴリ A1/A2 ---- */
 	tg_checkpoint(CP('A', 1));							/* A1: FreeRTOS タスクから到達 */
+	tg_puts("FreeRTOS NS console via Secure gate");		/* A: NS->Secure UART 出力の実証 */
 	tg_chk_u32(TGCHK_CONTROL_NS, g_ns_control, 0u);		/* A2: 起動時 CONTROL==0 */
 	tg_chk_u32(TGCHK_FAULTMASK,  g_ns_faultmask, 1u);	/* A2: 起動時 FAULTMASK==1 */
 

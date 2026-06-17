@@ -20,6 +20,7 @@
  */
 extern void tst_chk_u32(uint32_t id, uint32_t actual, uint32_t expected);
 extern void tst_mark(uint32_t tag);
+extern void tst_puts(const char *s);  /* [NS] <s> を出力(NS コンソール用) */
 extern void tst_done(void);     /* SUMMARY 行 + DONE センチネルを出力 */
 
 /*
