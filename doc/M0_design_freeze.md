@@ -73,6 +73,26 @@ SafeG-M/asp3 で `TOPPERS_SAFEG_M` に触れる全29ファイルを4分類。数
 | `sample/sample1.c` | 4 |
 | `FreeRTOS/`, `test/`, `tools/` | NS 側・テストハーネス・ツール |
 
+### 分類補足: `_SAFEG_BTASK` の `CRE_TSK` は **asp3_core 側（分類A/B）**で持つ（確定・現状維持）
+NS 実行を司る BTASK の `CRE_TSK` は `asp3_core/arch/arm_m_gcc/common/core_kernel.cfg`
+（`#ifdef TOPPERS_SAFEG_M`）に置き、各 `target_kernel.cfg` が**アプリ .cfg より前に** INCLUDE する。
+「SafeG 製品固有物なので SafeG-M 側で持つ方が素直では」という案を検討したが、**現状維持**とする。理由:
+
+1. **id=1 の構造保証（最重要）**: `core_support.S` は BTASK を `p_runtsk == &tcb_table[0]`
+   （=id=1=`TMIN_TSKID`）で判別する。よって BTASK は**必ず最初の `CRE_TSK`**でなければならず、
+   「アプリ .cfg より前」を構造的に担保できるのは cfg INCLUDE 順を握る **asp3_core 側だけ**。
+   SafeG-M 側に置くと全 SafeG-M アプリが「自分の先頭 `CRE_TSK` を BTASK にする」規律依存になり脆い。
+2. **シンボル局所性**: BTASK 本体 `_kernel_deactivate_nonsecure_interrupts` と exinf `TOPPERS_NS_VTOR`
+   は asp3_core/target 側シンボル。アプリへ移すと内部実装が漏れる。
+3. **レイヤの整合**: BTASK は「アプリのタスク」ではなく「SafeG カーネル拡張が NS を走らせる乗り物」。
+   案1 の線引き（SafeG カーネルレベル物=asp3_core に `#ifdef`／アプリ・テスト物=SafeG-M）に合致。
+   SafeG-M が真に所有すべき「どの NS を動かすか」は `TOPPERS_NS_VTOR`(ボード別)＋NS イメージ実体
+   （`SafeG-M/test`）として既に SafeG-M 側にあり、`CRE_TSK` だけが asp3_core にある格好。
+
+> 将来 SafeG-M 所有を優先する場合の代替: asp3_core が `SAFEG_CRE_BTASK()` マクロを提供し
+> アプリ .cfg の先頭で呼ぶ（所有感は SafeG-M／定義は asp3_core）。ただし「先頭で呼ぶ」規律依存は
+> 残り id=1 の構造保証が弱まるため、現時点では採らない。
+
 ---
 
 ## 5. `core_support.S` 9サイト棚卸し（実測・確定）
