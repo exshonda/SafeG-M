@@ -151,7 +151,7 @@ openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg -c "adapter speed 5000" 
 - `secure/`: `test_safeg.{c,h,cfg}`(A〜D1 本体・タスク/周期/例外), `test_gate.c`(`cmse_nonsecure_entry` gate 群), `test_safeg.cdl`(TECS・**M0 §10-Q4 で廃止確定**)。
 - `common/`: `test_gate.h`/`test_harness.{c,h}`（kernel 非依存・**移植不要**）。
 - `ns_baremetal/`: `ns_test_main.c`(共通) + **`mps2_an505_gcc/`**(ld+startup), **`mimxrt685evk_gcc/`**(Makefile)。← **RP2350 用は無い**。
-- `ns_freertos/`: `mimxrt685evk_gcc/` のみ。
+- `ns_freertos/`: `mimxrt685evk_gcc/` と `pico2_arm_gcc/`（後者は 2026-06-17 追加。RP2350 で NS=FreeRTOS 実機確認済。本書末尾「NS=FreeRTOS…確定再現手順」参照）。
 - A〜D1 のビルドフラグ: NS 側 `EXTRA_CFLAGS` に `-DTST_ENABLE_A3 / -DTST_ENABLE_C / -DTST_ENABLE_D1`（既定は A1/A2/B1〜B4）。
 
 ### 4.2 imxrt685(現行 green)との比較で必要になる差分
@@ -364,3 +364,80 @@ wait; cat /tmp/ns_serial.log      # → SUMMARY total=9 pass=9 fail=0 / DONE
 - **`reset; exit` で openocd を切断して自走させること**。`reset halt` で常駐したまま resume すると、D1 の NS `udf #0`→Secure HardFault をデバッガが handler 前に halt し **D1(CHK 209) が出ない**（imxrt685 §4 と同じ罠）。
 - **[TST] はワンショット同期出力** → `cat` を `reset` より先に起動。取りこぼしたら再 `reset` 前に capture を先行させる。
 - 事前に `init; reset halt; targets; exit` で **`reset halt` が通る(=SWD-lock 無し)** ことを確認してから program すると確実。timeout する劣化時は BOOTSEL(押しながら電源)で物理復旧。
+
+---
+
+## RP2350 NS=FreeRTOS（A: gate 出力）＋ NS 専用 UART1（B: 直接駆動）確定再現手順（2026-06-17）
+
+dual-OS で NS を FreeRTOS にし、(A) NS→Secure gate 経由の UART0 出力 と
+(B) NS が専用 UART1 を Secure 非経由で直接駆動 の両方を実機確認する手順。
+**実機 RP2350 で確認済**: UART0 に `[TST] SUMMARY total=5 pass=5` ＋ `[NS] ...via Secure gate`、
+UART1(別シリアル)に `[NS-UART1] RP2350 NS=FreeRTOS direct console (Secure-brought-up UART1)`。
+
+### 0. 前提・環境（このマシン）
+```bash
+export PATH="/usr/local/tools/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/bin:$PATH"
+SRC=/home/honda/TOPPERS/safeg-m
+# cmake/ninja は apt 版。openocd は RPi フォーク /usr/local/bin/openocd。
+```
+- UART0(Secure [TST]) = Debugprobe VCP = **`/dev/ttyACM0`**（接続毎に `udevadm info` で要確認）。
+- UART1(NS 直接, B) = **GP8(物理ピン11)=UART1 TX → 別 USB-シリアル(CP2102 等)の RX**、GND 共通、
+  この USB-シリアル = **`/dev/ttyUSB0`**（増えた tty を `ls /dev/ttyUSB*` で確認）。115200 8N1。
+
+### 1. Secure ビルド（asp3_core, SAFEG=1 + implib + UART1 ブリングアップ/ACCESSCTRL）
+```bash
+cd $SRC/asp3_core
+cmake --preset pico2_arm -B /tmp/run_sec \
+  -DENABLE_SAFEG_M=ON -DENABLE_SAFEG_IMPLIB=ON \
+  -DASP3_APPLNAME=test_safeg -DASP3_APPLDIR=$SRC/SafeG-M/test/secure \
+  -DASP3_EXTRA_APP_C_FILES="$SRC/SafeG-M/test/secure/test_gate.c;$SRC/SafeG-M/test/common/test_harness.c" \
+  -DASP3_APP_INCLUDE_DIRS=$SRC/SafeG-M/test/common
+cmake --build /tmp/run_sec            # → asp.elf + secure_nsclib.o
+# Secure 側 target_kernel_impl.c が UART1 を GP8/GP9 funcsel2 でブリングアップし、
+# SAU R3 で 0x40078000 を NS 化、ACCESSCTRL(0x400600A4 へ 0xACCE0000|0xFF)で NS 許可。
+```
+
+### 2. NS=FreeRTOS ビルド（要 freertos_base）
+```bash
+# 初回のみ FreeRTOS V10.3.1 を取得（既にあれば不要）
+[ -d $SRC/SafeG-M/freertos_base ] || sh $SRC/SafeG-M/tools/import_freertos.sh
+cd $SRC/SafeG-M/test/ns_freertos/pico2_arm_gcc
+make clean && make NSCLIB=/tmp/run_sec/secure_nsclib.o   # → nstest.bin(.text@0x10200000)
+# main_test.c が A1/A2/B を gate で検査(→UART0)。startup.c の ResetISR が ns_uart1_puts で
+# UART1(0x40078000)へ直接 "[NS-UART1] ..." を出力(→UART1)。
+```
+
+### 3. 書込み（SAFEG=1 は実走後 SWD ロックするため BOOTSEL でクリーン化）
+```bash
+# (a) BOOTSEL 押しながら Pico2 電源再投入 → 離す（ブートROM 待機=SWD クリーン）
+# (b) reset halt が通る(=ロック無し)ことを確認
+/usr/local/bin/openocd -f interface/cmsis-dap.cfg -c "transport select swd; adapter speed 5000" \
+  -f target/rp2350.cfg -c "init; reset halt; exit"        # halted ならOK
+# (c) 両イメージ書込み(reset しない=この後 1 回だけ自走させて取得するため)
+/usr/local/bin/openocd -f interface/cmsis-dap.cfg -c "transport select swd; adapter speed 5000" \
+  -f target/rp2350.cfg -c "init; reset halt" \
+  -c "program /tmp/run_sec/asp.elf verify" \
+  -c "program $SRC/SafeG-M/test/ns_freertos/pico2_arm_gcc/nstest.bin 0x10200000 verify" -c "exit"
+```
+
+### 4. 取得（[TST]/[NS-UART1] はワンショット。stty 115200 必須・ModemManager 停止）
+```bash
+sudo systemctl stop ModemManager           # ttyACM を奪わせない(CDC-ACM の Linux 定番ハマり)
+stty -F /dev/ttyACM0 115200 raw -echo -crtscts
+stty -F /dev/ttyUSB0 115200 raw -echo -crtscts
+# UART0(A/[TST]) と UART1(B/[NS-UART1]) を別々のブートで取得(出力は毎ブート同一):
+#   端末で  cat /dev/ttyUSB0   を開始 → Pico2 を電源再投入(BOOTSEL 押さない) → [NS-UART1] を確認
+#   再度    cat /dev/ttyACM0   を開始 → 電源再投入 → [TST] SUMMARY total=5 pass=5 / DONE を確認
+```
+期待:
+- `/dev/ttyACM0`: `[TST] CP A1` → `[NS] FreeRTOS NS console via Secure gate` → CHK1..5 PASS → `SUMMARY total=5 pass=5 fail=0` → `DONE`
+- `/dev/ttyUSB0`: `[NS-UART1] RP2350 NS=FreeRTOS direct console (Secure-brought-up UART1)`
+
+### 5. 罠回避・教訓（Linux 取得）
+- **`cat` 前に必ず `stty 115200`**。Debugprobe VCP は host 設定 baud で UART0 をサンプリングするため、
+  未設定だと無音になる（Windows 端末は設定済なので見える、の差で気づきにくい）。
+- **ModemManager 停止**必須（ttyACM を奪う）。CP2102(ttyUSB)は影響を受けにくい。
+- **SAFEG=1 ファーム実走後は SWD ロック** → 書込み前に必ず BOOTSEL クリーン化。
+- 取得が不安定なら**連続出力のベアメタル UART1 チェック**(SAFEG=0)で結線/経路を切り分ける(本書「実機 bring-up 確立」節の手法)。
+- **NS のペリフェラルアクセスは ACCESSCTRL 必須**。SAU で NS 属性にしても ACCESSCTRL を許可しないと
+  NS アクセスは BusFault(Excno=5)。**ACCESSCTRL 書込みは上位16bit に 0xACCE パスワード必須**(無しは無視)。
