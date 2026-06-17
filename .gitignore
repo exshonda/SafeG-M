@@ -14,6 +14,8 @@ secure_nsclib.o
 nstest.bin
 nstest.elf
 nstest.map
+nstest.axf
+*.axf
 out.map
 
 # キャプチャ/作業ログ（リポジトリ直下）
