@@ -295,3 +295,72 @@ dual-OS 遷移テスト(A1〜D1)のフル green 取得を試行。**ビルドは
   - 試行: (1) `reset halt`+program 5000kHz → timeout、(2) `program ... verify reset exit` 5000kHz → timeout、(3) `reset init` 2000kHz → timeout。**規定どおり 2 リトライで中断**。
 - リセット後シリアル(/dev/ttyACM2): 出力なし(バナー/[TST] とも無し)。
 - → **examination は通るが reset/halt 系が一律 timeout**＝doc 規定の劣化兆候。**RP2350 物理復旧(BOOTSEL 起動 or 電源再投入)が必要**。復旧後は上記 `/tmp/run_sec/asp.elf` + `nstest.bin @0x10200000` を `program ... verify reset` で書込み、/dev/ttyACM2 115200 で [TST] A1〜D1 / SUMMARY total=9 を取得する段に直結。
+
+---
+
+## ★ RP2350 実機フル A〜D1 = 9/9 PASS 達成（2026-06-17, SWD 経路）
+
+前項の劣化(reset/halt timeout)は**物理復旧後に解消**し、**SWD 経路のみでフル遷移テスト 9/9 green を取得**。
+UF2/picotool 経路は不要だった（SWD-lock が出ていない＝`reset halt` が通るクリーン状態なら SWD で完結）。
+
+### 結果（実測ログ）
+```
+[TST] START prog=safeg-trans
+[TST] RESULT_ADDR 0x2000001c
+[TST] CP A1 161
+[TST] CHK 1 exp=0x00000000 act=0x00000000 PASS   # A2 CONTROL
+[TST] CHK 2 exp=0x00000001 act=0x00000001 PASS   # A2 FAULTMASK
+[TST] CP A3 163 / CP B1 177
+[TST] CHK 3 exp=0x00000000 act=0x00000000 PASS   # B3 BASEPRI entry
+[TST] CHK 4 exp=0x00000080 act=0x00000080 PASS   # B2 API
+[TST] CHK 5 exp=0x00000000 act=0x00000000 PASS   # B3 BASEPRI after
+[TST] CP B4 180 / CP C1 193
+[TST] CHK 194 exp=0x00000002 act=0x00000002 PASS # C
+[TST] CHK 195 exp=0x00000080 act=0x00000080 PASS # C
+[TST] CHK 206 exp=0x00000001 act=0x00000001 PASS # C hi_task
+[TST] CP D0 208 / CP D1 209
+[TST] CHK 209 exp=0x00000001 act=0x00000001 PASS # D1 (NS udf→Secure HardFault)
+[TST] SUMMARY total=9 pass=9 fail=0 cp=7
+[TST] DONE
+```
+
+### この作業機の確定環境（旧記録から変化した点）
+- **シリアル= `/dev/ttyACM0` @115200**（Debugprobe VCP。旧 ttyACM2 から変化。接続後 `udevadm info -q property -n /dev/ttyACMx | grep 2e8a` で要再確認）。
+- **ビルドツール**: cmake 3.28.3 / ninja 1.11.1 は `apt` で導入（`~/.mcuxpressotools` 同梱版は無い）。arm toolchain は `/usr/local/tools/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/bin`(gcc 14.3.1)。
+- repo: asp3_core=`/home/honda/TOPPERS/safeg-m/asp3_core` `main`(3b548ab)、SafeG-M=`/home/honda/TOPPERS/safeg-m/SafeG-M` `main`(27c1a15)。両方 SafeG-M 作業が main に統合済。
+- Debugprobe FW=2.0.1(古い)→openocd が "low-performance workaround" を表示するが書込み・自走は成功。
+
+### 確定再現コマンド（このマシン）
+```bash
+export PATH="/usr/local/tools/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi/bin:$PATH"
+SRC=/home/honda/TOPPERS/safeg-m
+
+# 1) Secure(asp3_core, SAFEG=1 + implib) → /tmp/run_sec/{asp.elf,secure_nsclib.o}
+cd $SRC/asp3_core
+cmake --preset pico2_arm -B /tmp/run_sec \
+  -DENABLE_SAFEG_M=ON -DENABLE_SAFEG_IMPLIB=ON \
+  -DASP3_APPLNAME=test_safeg -DASP3_APPLDIR=$SRC/SafeG-M/test/secure \
+  -DASP3_EXTRA_APP_C_FILES="$SRC/SafeG-M/test/secure/test_gate.c;$SRC/SafeG-M/test/common/test_harness.c" \
+  -DASP3_APP_INCLUDE_DIRS=$SRC/SafeG-M/test/common
+cmake --build /tmp/run_sec        # FLASH 15956B / SG_veneer 96B / RAM 27816B
+
+# 2) NS(全カテゴリ) → nstest.bin @0x10200000
+cd $SRC/SafeG-M/test/ns_baremetal/pico2_arm_gcc
+make clean && make NSCLIB=/tmp/run_sec/secure_nsclib.o \
+  EXTRA_CFLAGS="-DTST_ENABLE_A3 -DTST_ENABLE_C -DTST_ENABLE_D1"
+
+# 3) シリアル capture を先行起動 → 書込み+verify+reset(自走)+exit(切断)
+stty -F /dev/ttyACM0 115200 raw -echo
+timeout 18 cat /dev/ttyACM0 > /tmp/ns_serial.log &
+/usr/local/bin/openocd -f interface/cmsis-dap.cfg \
+  -c "transport select swd; adapter speed 5000" -f target/rp2350.cfg \
+  -c "program /tmp/run_sec/asp.elf verify" \
+  -c "program $SRC/SafeG-M/test/ns_baremetal/pico2_arm_gcc/nstest.bin 0x10200000 verify" \
+  -c "reset; exit"
+wait; cat /tmp/ns_serial.log      # → SUMMARY total=9 pass=9 fail=0 / DONE
+```
+
+### 重要ポイント（罠回避）
+- **`reset; exit` で openocd を切断して自走させること**。`reset halt` で常駐したまま resume すると、D1 の NS `udf #0`→Secure HardFault をデバッガが handler 前に halt し **D1(CHK 209) が出ない**（imxrt685 §4 と同じ罠）。
+- **[TST] はワンショット同期出力** → `cat` を `reset` より先に起動。取りこぼしたら再 `reset` 前に capture を先行させる。
+- 事前に `init; reset halt; targets; exit` で **`reset halt` が通る(=SWD-lock 無し)** ことを確認してから program すると確実。timeout する劣化時は BOOTSEL(押しながら電源)で物理復旧。
