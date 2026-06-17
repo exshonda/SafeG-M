@@ -24,6 +24,36 @@ uint32_t SystemCoreClock = 150000000u;
 void ResetISR(void);
 static void Default_Handler(void);
 
+/*
+ *  【SAFEG/B】NS 専用 UART1 への直接出力。
+ *  Secure(target_kernel_impl.c safeg_ns_uart1_init)が UART1 をブリングアップ済で、
+ *  SAU R3 がデータレジスタ領域 0x40078000 を NS に開放している。NS はここを直接
+ *  叩いて自前コンソール出力する(Secure gate を介さない=B の本質)。出力は GP8(UART1 TX)。
+ */
+#define NS_UART1_BASE   0x40078000u
+#define NS_UART1_DR     (*(volatile uint32_t *)(NS_UART1_BASE + 0x000))
+#define NS_UART1_FR     (*(volatile uint32_t *)(NS_UART1_BASE + 0x018))
+#define NS_UART1_FR_TXFF (1u << 5)
+
+static void ns_uart1_putc(char c)
+{
+    while (NS_UART1_FR & NS_UART1_FR_TXFF) {
+    }
+    NS_UART1_DR = (uint32_t)(unsigned char)c;
+}
+
+void ns_uart1_puts(const char *s)
+{
+    while (*s != '\0') {
+        if (*s == '\n') {
+            ns_uart1_putc('\r');
+        }
+        ns_uart1_putc(*s++);
+    }
+    ns_uart1_putc('\r');
+    ns_uart1_putc('\n');
+}
+
 /* NS ベクタテーブル。先頭2語(MSP/Reset)を launch_ns が使用し、
  * 以降は VTOR_NS 経由で例外ディスパッチされる。 */
 __attribute__((used, section(".isr_vector")))
@@ -54,6 +84,8 @@ void ResetISR(void)
     for (dst = &__bss_start; dst < &__bss_end; ) {
         *dst++ = 0u;
     }
+    /* 【SAFEG/B】NS が自前 UART1 を直接駆動して出力(Secure 非経由・別シリアルで観測) */
+    ns_uart1_puts("[NS-UART1] RP2350 NS=FreeRTOS direct console (Secure-brought-up UART1)");
     (void)main();
     for (;;) {
         /* main は戻らない想定 */
