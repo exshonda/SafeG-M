@@ -7,6 +7,7 @@
  */
 #include <kernel.h>
 #include <t_syslog.h>
+#include <arm_cmse.h>
 #include "syssvc/syslog.h"
 #include "core_insn.h"
 #include "kernel_cfg.h"
@@ -110,7 +111,19 @@ tg_basepri_check(void)
 void NSE
 tg_begin_preempt(volatile uint32_t *ns_flag)
 {
-	g_ns_flag = ns_flag;
+	/*
+	 *  TrustZone-M: Secure は NS 由来のポインタを無検証で信用してはならない．
+	 *  cmse_check_address_range で「NS から R/W 可能な領域」であることを確認して
+	 *  からのみ保持する．不正アドレス(Secure RAM/MMIO 等)は拒否し，hi_task の
+	 *  Secure→NS 書込み(*g_ns_flag=1)をスキップさせる(g_ns_flag=NULL)．
+	 */
+	if (cmse_check_address_range((void *)ns_flag, sizeof(uint32_t),
+								 CMSE_NONSECURE | CMSE_MPU_READWRITE) != NULL) {
+		g_ns_flag = ns_flag;
+	}
+	else {
+		g_ns_flag = NULL;
+	}
 	g_c_done = 0;
 	g_ns_looping = 1;
 	set_basepri(0);
