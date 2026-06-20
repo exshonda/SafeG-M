@@ -1,60 +1,25 @@
 ---
 name: safeg-m-ops
-description: SafeG-M リポジトリ固有の運用（ARMv8-M TrustZone Dual-OS: Secure=ASP3 / NS=FreeRTOS等）。asp3_core ベース（案1）で Secure+NS の遷移テスト(test/) を実機で回すときの具体手順。test_safeg アプリの CMake ビルドレシピ、NS ベアメタル(test/ns_baremetal/<target>)の TST_ENABLE_A3/_C/_D1、2イメージ書込み、`[TST]` 機械可読出力の取得・合否判定を扱うとき。実機 i.MX RT685(LinkServer/ttyACM1) や RP2350(Pico2: openocd/ttyACM2) で A〜D1 遷移テストを取るとき、QEMU mps2-an505 の INVEP 限界・RP2350 の SAFEG=1 SWD-lock・imxrt685 の D1 デバッガhalt-on-fault(RESET自走+capture先行) に当たったときに使う。**正本は repo の `doc/HANDOFF.md`。asp3_core 側のビルド/QEMU/実機ロードは別skill `asp3-core-ops`、TOPPERS共通概念は `toppers-kernel-dev`/`toppers-kernel-debug`/`toppers-asp`。本skillは SafeG-M 固有の Dual-OS 遷移テストの叩き方だけを補う。**
+description: SafeG-M リポジトリ固有の運用（ARMv8-M TrustZone Dual-OS: Secure=ASP3(asp3_core) / NS=FreeRTOS・ベアメタル）。asp3_core ベース（案1）で Secure+NS 遷移テスト(test/) を実機で回すとき＝test_safeg の CMake ビルド、NS の `TST_ENABLE_A3/_C/_D1`、2イメージ書込み、`[TST]` 取得・合否判定。実機 i.MX RT685 / RP2350(Pico2) で A〜D1 を取るとき、QEMU mps2-an505 の INVEP 限界・RP2350 の SAFEG=1 SWD-lock・**[TST]ワンショット＝capture先行＋デバッガ非接続で自走**・FPU退避(BTASK)回帰 に当たったときに使う。**規約・ビルド・実機手順の正本は repo の `AGENTS.md`（→`doc/HANDOFF.md`）。asp3_core 側の CMake/QEMU/OpenOCD は別skill `asp3-core-ops`、TOPPERS共通概念は `toppers-kernel-dev`/`toppers-kernel-debug`/`toppers-asp`。本skillは発動トリガと役割分担を示し、具体手順は AGENTS.md へ委譲する。**
 ---
 
-# SafeG-M 運用（リポジトリ固有・Dual-OS 遷移テスト）
+# SafeG-M 運用（リポジトリ固有・委譲ハブ）
 
-SafeG-M(TrustZone-M Dual-OS) を **外部の素 asp3_core(CMake/非TECS) に SafeG改変を `#ifdef TOPPERS_SAFEG_M` で取り込む「案1」**で運用するときの具体手順。概念・規約は他で正本化済み。ここは「このリポでの叩き方」に徹する。
+このリポは TrustZone-M Dual-OS（Secure=ASP3 on `asp3_core` / NS=FreeRTOS・ベアメタル）。SafeG 改変は **案1**（素 asp3_core に `#ifdef TOPPERS_SAFEG_M` 取込み・既定OFFで非回帰）。**具体手順は重複を避け、このリポの正本へ委譲する。**
 
-## 正本・関連（先に読む）
-- **このリポの正本**: `doc/HANDOFF.md`（現状/ブランチ/再現手順/残課題/HW環境を網羅）。設計凍結=`doc/M0_design_freeze.md`、実機9/9記録=`doc/asp3core_imxrt685_full_green.md`、各フェーズ設計=`doc/m2_loadin_spec.md`/`doc/m3_nontecs_test.md`/`doc/rp2350_bringup.md`、テスト仕様=`doc/test_safeg.md`。
-- **asp3_core 側の具体手順**（CMake preset・QEMU・OpenOCD・slog・TTSP3・DWT）: 別リポ skill `asp3-core-ops`、`asp3_core/docs/dev/safeg.md`。
-- **TOPPERS共通概念**（実装非依存）: `toppers-kernel-dev`（規約/移植/上流追従）・`toppers-kernel-debug`（症状→原因/観測/TZ遷移）・`toppers-asp`（API/静的API）。
+## まず読む（正本）
+- **`AGENTS.md`** … 規約・禁則・**ビルド/実機テストの具体コマンド**・役割分担・版固定・doc索引（全AIツール共通の正本）。`CLAUDE.md` は AGENTS.md を参照するだけ。
+- **`doc/HANDOFF.md`** … 別PC/別セッション再開メモ・**マシン依存のHW環境(probe/tty/復旧)**・残課題。
+- 設計凍結=`doc/M0_design_freeze.md`、実機green記録=`doc/asp3core_imxrt685_full_green.md`・`doc/rp2350_bringup.md`、テスト仕様=`doc/test_safeg.md`。
 
-## 0. 配置（workspace sibling）
-asp3_core と SafeG-M を**横並び clone**。SafeG-M のビルドは asp3_core の CMake に `-DASP3CORE_DIR=<asp3_coreパス>` 相当で参照（submodule不採用）。asp3_core main に SafeG TZ＋各ボードSAFEG層、SafeG-M main に test/NS/doc。
+## 役割分担（他skillとの境界）
+- **asp3_core 側の叩き方**（CMake preset・QEMU・OpenOCD・slog・TTSP3・DWT・`ENABLE_SAFEG_M`/`ENABLE_SAFEG_IMPLIB`・SAFEG層・素ビルド非回帰）→ 別リポ skill **`asp3-core-ops`** ＋ `asp3_core/docs/dev/safeg.md`。
+- **TOPPERS共通概念**（実装非依存）→ `toppers-kernel-dev`（規約/移植/上流追従）・`toppers-kernel-debug`（症状→原因/観測/TZ遷移の着眼）・`toppers-asp`（API/静的API）。
+- **本リポ固有の Dual-OS 遷移テスト運用** → 本skill＝**AGENTS.md §4/§5 と HANDOFF.md を指す**。
 
-## 1. Secure テストアプリ（test_safeg）ビルド（asp3_core CMake）
-asp3_core 側で SAFEG有効＋gate implib＋アプリ=SafeG-M の `test/secure` を指定（裏取り済: 実機 i.MX RT685 で 9/9 取得時のレシピ）。
-
-```bash
-# <RT>=asp3_coreパス, <SM>=SafeG-Mパス, <preset>= mimxrt685evk | pico2_arm | mps2_an505-qemu
-cmake -S <RT> -B build/safeg --preset <preset> \
-  -DENABLE_SAFEG_M=ON -DENABLE_SAFEG_IMPLIB=ON \
-  -DASP3_APPLNAME=test_safeg -DASP3_APPLDIR=<SM>/test/secure \
-  -DASP3_EXTRA_APP_C_FILES="<SM>/test/secure/test_gate.c;<SM>/test/common/test_harness.c" \
-  -DASP3_APP_INCLUDE_DIRS=<SM>/test/common
-cmake --build build/safeg          # → asp.elf/asp.srec ＋ secure_nsclib.o(gate implib)
-```
-- `ENABLE_SAFEG_IMPLIB`（既定OFF）= **gate(`cmse_nonsecure_entry`)を持つアプリのみ**で `--out-implib=secure_nsclib.o` を最終ELFに付与（gate無 sample だと "no symbols" 失敗するため opt-in）。NS がこれをリンクする。
-- `ENABLE_SAFEG_M=ON` 自体・対象ボード・素ビルド非回帰は `asp3-core-ops` / `asp3_core/docs/dev/safeg.md`。
-
-## 2. NS ベアメタル ビルド（SafeG-M 側）
-NS は `test/ns_baremetal/<target>_gcc/`（an505 / pico2_arm / mimxrt685evk）。**`TST_ENABLE_A3/_C/_D1` は NS 側のみ有効**（Secure は常時全ハンドラ提供）。`secure_nsclib.o` をリンク。NS_VTOR は imxrt685=0x8400000 / RP2350=0x10200000 / an505=0x00200000。
-
-```bash
-cd <SM>/test/ns_baremetal/mimxrt685evk_gcc
-make EXTRA_CFLAGS="-DTST_ENABLE_A3 -DTST_ENABLE_C -DTST_ENABLE_D1"   # → nstest.axf/bin
-```
-
-## 3. 書込み＋[TST]取得（ボード別・**遷移の正は実機**）
-`[TST]` は同期出力（`test_harness.c` が logmask 調整で LogTask 非依存・即時 UART）。判定= **`[TST] DONE` 到達 && `SUMMARY ... fail=0`**。CP: A(起動/復帰) B(gate) C(割込/ディスパッチ) D1(NS例外捕捉)。
-
-### i.MX RT685（推奨・9/9 実績）
-- 書込み: LinkServer（probe `ISA0BQNQ`, device `MIMXRT685S:EVK-MIMXRT685`）で Secure `load asp.srec`、NS `load nstest.axf`。
-- 取得: **デバッガ非接続で RESET 自走が必須**（LinkServer run 等デバッガ常駐だと D1 の NS udf→HardFault を firmware の handler 前に halt して D1 が出ない）。**`cat /dev/ttyACM1`(115200) を先に開始してから RESET ボタン**（[TST] はワンショット）→ `SUMMARY total=9 pass=9 fail=0 / DONE`。
-- `load` 後 boot-ROM stall で自走しないことあり→RESET/電源再投入で復旧。詳細は `doc/asp3core_imxrt685_full_green.md`。
-
-### RP2350(Pico2)
-- 接続: Pico debugprobe(CMSIS-DAP `2e8a:000c`)、openocd `interface/cmsis-dap.cfg`+`target/rp2350.cfg`+`transport select swd; adapter speed 5000`、VCOM `/dev/ttyACM2`。
-- ⚠️ **SAFEG=1 ファーム実走後に SWD デバッグがロック**（セキュアデバッグ挙動）→ SWD反復書込み困難。実機フル取得は **BOOTSEL＋UF2/picotool（USBマスストレージ・SWD非依存）経路が必要**（残課題、`doc/rp2350_bringup.md`）。劣化時は **BOOTSEL(押しながら電源)で復旧**。遷移自体は実機RP2350でNS launch完走・INVEP無しを確認済。
-
-### QEMU mps2-an505（実機なし・**非遷移CIのみ**）
-- `asp3-core-ops` の QEMU手順＋NSを `-device loader,file=<ns.bin>,addr=0x00200000`。⚠️ **最初の Secure gate で QEMU 固有 SecureFault `SFSR.INVEP`**（8.2.2/11.0.1で再現、実機では出ない）＝SG/Secure例外エミュ限界で A〜D1 完走不可。ビルド健全性/非遷移系の確認に使う。
-
-## 4. このリポの落とし穴（実機運用）
-- 全 LinkServer/openocd/シリアルは `timeout` で囲む（過去にハング多発）。
-- ビルド成果物 `nstest.*`/`out.map`/直下 `*.log` は `.gitignore` 済（コミットしない）。
-- `[TST]` ワンショット＝**capture を先に開始してから RESET**（後追い cat だと取り逃す）。
-- FPU退避バグ修正(A)（`core_support.S` で BTASK の FP退避/復帰スキップ＝asp3_core側）は ASP3更新時の最重要回帰。C カテゴリ実行で非回帰確認。詳細は `asp3-core-ops`/`asp3_core/docs/dev/safeg.md`。
+## このリポで繰り返し効く要点（詳細は AGENTS.md）
+- ビルドは Secure(asp3_core CMake, `ENABLE_SAFEG_M=ON` ＋ gate保有時 `ENABLE_SAFEG_IMPLIB=ON`)→NS(`test/ns_baremetal/<board>_gcc`, `TST_ENABLE_A3/_C/_D1` は NS側のみ)の順（NS が `secure_nsclib.o` をリンク）。
+- **実機取得は「シリアル capture を reset より先に起動」＋「デバッガ非接続で自走」**（常駐デバッガは D1 の NS udf→Secure HardFault を handler 前に halt して D1 が出ない。`[TST]` はワンショット）。判定＝`[TST] DONE && SUMMARY ... fail=0`。
+- 役割: RP2350(pico2_arm)=遷移の主、imxrt685=保険、QEMU mps2-an505=非遷移CI（QEMUは SG/INVEP 限界で遷移green不可）。
+- 最重要回帰=FPU退避（BTASKのFP退避skip, asp3_core `core_support.S`）。ASP3更新時は C カテゴリで非回帰確認。
+- ビルド成果物(`nstest.*`/`*.axf`/`out.map`/直下`*.log`)は `.gitignore` 済（コミットしない）。
