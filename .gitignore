@@ -26,3 +26,8 @@ out.map
 *.tgz
 *.tar.gz
 *.bak
+
+# .claude は skills だけ追跡（セッション/設定は除外）
+.claude/*
+!.claude/skills/
+!.claude/skills/**
